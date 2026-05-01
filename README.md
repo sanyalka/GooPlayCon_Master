@@ -5,7 +5,8 @@
 - массовое копирование текстов листинга (название, короткое и полное описание) между локализациями;
 - массовая загрузка скриншотов из мастер-папки со структурой `язык/1n.jpg, 2n.jpg`;
 - массовое удаление изображений выбранного типа;
-- простой графический интерфейс на Tkinter.
+- экспорт всех заполненных локалей в один JSON-файл для редактирования;
+- импорт этого JSON обратно в Google Play Console.
 
 ## Структура проекта
 
@@ -45,6 +46,23 @@ master_screenshots/
 ```
 
 Поддерживаются расширения: `jpg`, `jpeg`, `png`, `webp`.
+
+## Формат JSON экспорта/импорта
+
+```json
+{
+  "packageName": "com.example.app",
+  "listings": {
+    "en-US": {
+      "title": "App title",
+      "short_description": "Short description",
+      "full_description": "Full description"
+    }
+  }
+}
+```
+
+Допускается импорт как `short_description/full_description`, так и API-формат `shortDescription/fullDescription`.
 
 ## Важно
 

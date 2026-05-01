@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-
-
-TEXT_FIELDS = ("title", "shortDescription", "fullDescription")
 
 
 @dataclass
@@ -46,6 +44,58 @@ class GooglePlayConsoleTool:
             short_description=listing.get("shortDescription", ""),
             full_description=listing.get("fullDescription", ""),
         )
+
+    def list_filled_locales(self) -> Dict[str, ListingText]:
+        edit_id = self._insert_edit()
+        response = self.service.edits().listings().list(
+            packageName=self.package_name,
+            editId=edit_id,
+        ).execute()
+        result: Dict[str, ListingText] = {}
+        for item in response.get("listings", []):
+            locale = item.get("language")
+            if not locale:
+                continue
+            result[locale] = ListingText(
+                title=item.get("title", ""),
+                short_description=item.get("shortDescription", ""),
+                full_description=item.get("fullDescription", ""),
+            )
+        return result
+
+    def export_listings_to_json(self, output_file: str) -> int:
+        data = self.list_filled_locales()
+        payload = {
+            "packageName": self.package_name,
+            "listings": {locale: asdict(text) for locale, text in data.items()},
+        }
+        Path(output_file).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return len(data)
+
+    def import_listings_from_json(self, input_file: str) -> Dict[str, str]:
+        payload = json.loads(Path(input_file).read_text(encoding="utf-8"))
+        listings = payload.get("listings", {})
+        if not isinstance(listings, dict):
+            raise ValueError("Некорректный JSON: поле 'listings' должно быть объектом")
+
+        edit_id = self._insert_edit()
+        result: Dict[str, str] = {}
+        for locale, values in listings.items():
+            body = {
+                "language": locale,
+                "title": values.get("title", ""),
+                "shortDescription": values.get("short_description", values.get("shortDescription", "")),
+                "fullDescription": values.get("full_description", values.get("fullDescription", "")),
+            }
+            self.service.edits().listings().patch(
+                packageName=self.package_name,
+                editId=edit_id,
+                language=locale,
+                body=body,
+            ).execute()
+            result[locale] = "updated"
+        self._commit_edit(edit_id)
+        return result
 
     def copy_listing_text(self, source_locale: str, target_locales: Iterable[str]) -> Dict[str, str]:
         src = self.get_listing_text(source_locale)
@@ -94,14 +144,13 @@ class GooglePlayConsoleTool:
             )
             uploaded = 0
             for img in files:
-                with img.open("rb") as fh:
-                    self.service.edits().images().upload(
-                        packageName=self.package_name,
-                        editId=edit_id,
-                        language=locale,
-                        imageType=image_type,
-                        media_body=img.as_posix(),
-                    ).execute()
+                self.service.edits().images().upload(
+                    packageName=self.package_name,
+                    editId=edit_id,
+                    language=locale,
+                    imageType=image_type,
+                    media_body=img.as_posix(),
+                ).execute()
                 uploaded += 1
             result[locale] = uploaded
 
