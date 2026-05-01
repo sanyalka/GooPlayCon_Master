@@ -18,18 +18,18 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("GooPlayCon Master")
-        self.geometry("1080x760")
+        self.geometry("1080x780")
         self.minsize(980, 700)
 
         self.service_json = tk.StringVar()
         self.package_name = tk.StringVar()
         self.source_locale = tk.StringVar(value="en-US")
-        self.target_locales = tk.StringVar(value="ru-RU,uk-UA")
         self.master_folder = tk.StringVar()
         self.image_type = tk.StringVar(value=IMAGE_TYPES[1])
         self.status_text = tk.StringVar(value="Готов к работе")
 
         self._action_buttons: list[ttk.Button] = []
+        self._locales: list[str] = []
 
         self._init_style()
         self._build_ui()
@@ -67,9 +67,21 @@ class App(tk.Tk):
 
         self._entry_row(auth_card, "Service account JSON", self.service_json, pick_file=True)
         self._entry_row(auth_card, "Package name", self.package_name)
+        ttk.Label(
+            auth_card,
+            text="Данные не хранятся в приложении: настройки берутся из полей UI,\nа JSON экспорт/импорт сохраняется только в выбранный вами файл.",
+            style="SubHeader.TLabel",
+        ).pack(anchor="w", pady=(8, 0))
 
         self._entry_row(listing_card, "Исходная локаль", self.source_locale)
-        self._entry_row(listing_card, "Целевые локали (через запятую)", self.target_locales)
+        tools = ttk.Frame(listing_card)
+        tools.pack(fill="x", pady=(4, 6))
+        ttk.Button(tools, text="Загрузить локали с Google Play", command=self.load_locales_from_play).pack(side="left")
+        ttk.Button(tools, text="Выбрать все", command=self.select_all_locales).pack(side="left", padx=6)
+        ttk.Button(tools, text="Снять выбор", command=self.clear_locales_selection).pack(side="left")
+
+        self.locale_list = tk.Listbox(listing_card, selectmode=tk.MULTIPLE, height=8)
+        self.locale_list.pack(fill="both", expand=True)
 
         media_card = ttk.LabelFrame(root, text="Изображения", style="Card.TLabelframe")
         media_card.pack(fill="x", pady=(0, 10))
@@ -89,7 +101,6 @@ class App(tk.Tk):
 
         actions_card = ttk.LabelFrame(root, text="Операции", style="Card.TLabelframe")
         actions_card.pack(fill="x", pady=(0, 10))
-
         grid = ttk.Frame(actions_card)
         grid.pack(fill="x")
 
@@ -104,8 +115,7 @@ class App(tk.Tk):
 
         log_card = ttk.LabelFrame(root, text="Журнал", style="Card.TLabelframe")
         log_card.pack(fill="both", expand=True)
-
-        self.log = tk.Text(log_card, height=18, bg="#0f172a", fg="#e2e8f0", insertbackground="#e2e8f0", relief="flat")
+        self.log = tk.Text(log_card, height=16, bg="#0f172a", fg="#e2e8f0", insertbackground="#e2e8f0", relief="flat")
         self.log.pack(fill="both", expand=True)
 
         status = ttk.Frame(root)
@@ -138,8 +148,9 @@ class App(tk.Tk):
     def _client(self):
         return GooglePlayConsoleTool(self.service_json.get().strip(), self.package_name.get().strip())
 
-    def _locales(self):
-        return [x.strip() for x in self.target_locales.get().split(",") if x.strip()]
+    def _selected_locales(self):
+        idx = self.locale_list.curselection()
+        return [self.locale_list.get(i) for i in idx]
 
     def _set_busy(self, busy: bool, text: str):
         self.status_text.set(text)
@@ -164,10 +175,33 @@ class App(tk.Tk):
         self.log.insert("end", text + "\n")
         self.log.see("end")
 
+    def load_locales_from_play(self):
+        def task():
+            c = self._client()
+            locales_data = c.list_filled_locales()
+            locales = sorted(locales_data.keys())
+            self._locales = locales
+
+            def fill_listbox():
+                self.locale_list.delete(0, "end")
+                for loc in locales:
+                    self.locale_list.insert("end", loc)
+                self._log(f"Загружены локали из Google Play: {locales}")
+
+            self.after(0, fill_listbox)
+
+        self._run_bg(task, "Загрузка локалей")
+
+    def select_all_locales(self):
+        self.locale_list.select_set(0, "end")
+
+    def clear_locales_selection(self):
+        self.locale_list.selection_clear(0, "end")
+
     def copy_texts(self):
         def task():
             c = self._client()
-            locales = self._locales()
+            locales = self._selected_locales()
             self._log(f"Копирование текстов {self.source_locale.get()} -> {locales}")
             result = c.copy_listing_text(self.source_locale.get().strip(), locales)
             self._log(f"Готово: {result}")
@@ -177,7 +211,7 @@ class App(tk.Tk):
     def upload_images(self):
         def task():
             c = self._client()
-            locales = self._locales()
+            locales = self._selected_locales()
             self._log(f"Загрузка изображений ({self.image_type.get()}) из {self.master_folder.get()}")
             result = c.upload_images_from_master_folder(
                 image_type=self.image_type.get(),
@@ -189,12 +223,12 @@ class App(tk.Tk):
         self._run_bg(task, "Загрузка изображений")
 
     def delete_images(self):
-        if not messagebox.askyesno("Подтверждение", "Удалить все изображения выбранного типа в целевых локалях?"):
+        if not messagebox.askyesno("Подтверждение", "Удалить все изображения выбранного типа в выбранных локалях?"):
             return
 
         def task():
             c = self._client()
-            locales = self._locales()
+            locales = self._selected_locales()
             self._log(f"Удаление изображений ({self.image_type.get()}) в {locales}")
             result = c.delete_all_images(self.image_type.get(), locales)
             self._log(f"Готово: {result}")
