@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, Optional
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -123,6 +123,7 @@ class GooglePlayConsoleTool:
         image_type: str,
         master_folder: str,
         target_locales: Optional[Iterable[str]] = None,
+        progress_callback: Optional[Callable[[int, int, str, str], None]] = None,
     ) -> Dict[str, int]:
         edit_id = self._insert_edit()
         root = Path(master_folder)
@@ -131,7 +132,7 @@ class GooglePlayConsoleTool:
             allowed = set(target_locales)
             locales = [p for p in locales if p.name in allowed]
 
-        result: Dict[str, int] = {}
+        uploads_plan: list[tuple[str, Path]] = []
         for locale_dir in locales:
             locale = locale_dir.name
             files = sorted(
@@ -142,17 +143,25 @@ class GooglePlayConsoleTool:
                 ],
                 key=lambda p: p.name,
             )
-            uploaded = 0
             for img in files:
-                self.service.edits().images().upload(
-                    packageName=self.package_name,
-                    editId=edit_id,
-                    language=locale,
-                    imageType=image_type,
-                    media_body=img.as_posix(),
-                ).execute()
-                uploaded += 1
-            result[locale] = uploaded
+                uploads_plan.append((locale, img))
+
+        total = len(uploads_plan)
+        done = 0
+        result: Dict[str, int] = {}
+
+        for locale, img in uploads_plan:
+            self.service.edits().images().upload(
+                packageName=self.package_name,
+                editId=edit_id,
+                language=locale,
+                imageType=image_type,
+                media_body=img.as_posix(),
+            ).execute()
+            done += 1
+            result[locale] = result.get(locale, 0) + 1
+            if progress_callback:
+                progress_callback(done, total, locale, img.name)
 
         self._commit_edit(edit_id)
         return result

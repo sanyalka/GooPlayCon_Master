@@ -113,9 +113,16 @@ class App(tk.Tk):
         for i in range(3):
             grid.columnconfigure(i, weight=1)
 
+        progress_card = ttk.LabelFrame(root, text="Прогресс загрузки изображений", style="Card.TLabelframe")
+        progress_card.pack(fill="x", pady=(0, 10))
+        self.upload_progress = ttk.Progressbar(progress_card, orient="horizontal", mode="determinate", maximum=100)
+        self.upload_progress.pack(fill="x")
+        self.upload_progress_label = ttk.Label(progress_card, text="Пока нет активной загрузки")
+        self.upload_progress_label.pack(anchor="w", pady=(6, 0))
+
         log_card = ttk.LabelFrame(root, text="Журнал", style="Card.TLabelframe")
         log_card.pack(fill="both", expand=True)
-        self.log = tk.Text(log_card, height=16, bg="#0f172a", fg="#e2e8f0", insertbackground="#e2e8f0", relief="flat")
+        self.log = tk.Text(log_card, height=14, bg="#0f172a", fg="#e2e8f0", insertbackground="#e2e8f0", relief="flat")
         self.log.pack(fill="both", expand=True)
 
         status = ttk.Frame(root)
@@ -175,6 +182,15 @@ class App(tk.Tk):
         self.log.insert("end", text + "\n")
         self.log.see("end")
 
+    def _reset_upload_progress(self):
+        self.upload_progress["value"] = 0
+        self.upload_progress_label.configure(text="Пока нет активной загрузки")
+
+    def _update_upload_progress(self, done: int, total: int, locale: str, filename: str):
+        percent = (done / total * 100) if total else 100
+        self.upload_progress["value"] = percent
+        self.upload_progress_label.configure(text=f"{done}/{total} • {locale} • {filename}")
+
     def load_locales_from_play(self):
         def task():
             c = self._client()
@@ -212,11 +228,17 @@ class App(tk.Tk):
         def task():
             c = self._client()
             locales = self._selected_locales()
+            self.after(0, self._reset_upload_progress)
             self._log(f"Загрузка изображений ({self.image_type.get()}) из {self.master_folder.get()}")
+
+            def progress(done: int, total: int, locale: str, filename: str):
+                self.after(0, lambda: self._update_upload_progress(done, total, locale, filename))
+
             result = c.upload_images_from_master_folder(
                 image_type=self.image_type.get(),
                 master_folder=self.master_folder.get().strip(),
                 target_locales=locales,
+                progress_callback=progress,
             )
             self._log(f"Готово: {result}")
 
